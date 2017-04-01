@@ -50,7 +50,7 @@ int main(int argc, char* argv[]) {
     int idx = 1;
     for (; idx < argc; idx++) {
         if (strcmp("-c", argv[idx]) == 0) cpu_mask = 1 << strtol(argv[++idx], (char **)NULL, 10);
-        if (strcmp("-d", argv[idx]) == 0) duration = strtol(argv[++idx], (char **)NULL, 10) * 1000000000ul;
+        if (strcmp("-d", argv[idx]) == 0) duration = strtol(argv[++idx], (char **)NULL, 10) * NANOS_IN_SEC;
         if (strcmp("-r", argv[idx]) == 0) granularity = strtol(argv[++idx], (char **)NULL, 10) * 1000000ul;
         if (strcmp("-o", argv[idx]) == 0) {
             char *output = argv[++idx];

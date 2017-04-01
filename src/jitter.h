@@ -2,10 +2,10 @@
 #define JITTER_H
 
 struct jitter {
-    unsigned long timestamp;
-    unsigned long delay;
+    unsigned long long timestamp;
+    unsigned long long delay;
 };
 
-typedef void (*process_output) (unsigned long, struct jitter*);
+typedef void (*process_output) (unsigned long long, struct jitter*);
 
 #endif //JITTER_H

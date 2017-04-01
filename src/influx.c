@@ -24,9 +24,9 @@ struct sockaddr_in serverAddr;
 void publish_batch(int idx, int batch_size, struct jitter* jitter) {
     int buf_offset = 0;
     for (int i = 0; i < batch_size; i++) {
-        unsigned long time = jitter[idx+i].timestamp;
-        unsigned long latency = jitter[idx+i].delay;
-        buf_offset += sprintf((char*) (buf + buf_offset), "jitter,host=%s latency=%lu %lu\n", hostname, latency, time);
+        unsigned long long time = jitter[idx+i].timestamp;
+        unsigned long long latency = jitter[idx+i].delay;
+        buf_offset += sprintf((char*) (buf + buf_offset), "jitter,host=%s latency=%llu %llu\n", hostname, latency, time);
     }
 
     sendto(sockfd, buf, strlen(buf), SOCK_NONBLOCK, &serverAddr, sizeof serverAddr);
@@ -45,7 +45,7 @@ void init_udp(char *host, char *port) {
     serverAddr.sin_port = htons(strtol(port, (char **)NULL, 10));
 }
 
-void process_out(unsigned long size, struct jitter *results) {
+void process_out(unsigned long long size, struct jitter *results) {
     int idx = 0;
     while (idx + BATCH_SIZE < size) {
         publish_batch(idx, BATCH_SIZE, results);

@@ -6,26 +6,28 @@
 #include "jitter.h"
 #include "influx.h"
 
-struct timespec ts;
-long cpu_mask = -1l;
+#define NANOS_IN_SEC 1000000000ul
 
-unsigned long nano_time() {
+struct timespec ts;
+long long cpu_mask = -1l;
+
+unsigned long long nano_time() {
     clock_gettime(CLOCK_REALTIME, &ts);
-    return ts.tv_sec * 1000000000l + ts.tv_nsec;
+    return ts.tv_sec * NANOS_IN_SEC + ts.tv_nsec;
 }
 
-unsigned long capture_jitter(unsigned long duration, unsigned long granularity, struct jitter *jitter) {
-    unsigned long ts = nano_time();
-    unsigned long deadline = ts + duration;
-    unsigned long next_report = ts + granularity;
-    unsigned long max = 0;
-    unsigned long idx = 0;
+unsigned long long capture_jitter(unsigned long long duration, unsigned long long granularity, struct jitter *jitter) {
+    unsigned long long ts = nano_time();
+    unsigned long long deadline = ts + duration;
+    unsigned long long next_report = ts + granularity;
+    unsigned long long max = 0;
+    unsigned long long idx = 0;
 
-    sched_setaffinity(0, sizeof(long), (const cpu_set_t *) &cpu_mask);
+    sched_setaffinity(0, sizeof(long long), (const cpu_set_t *) &cpu_mask);
 
     while (ts < deadline) {
-        unsigned long now = nano_time();
-        unsigned long latency = now - ts;
+        unsigned long long now = nano_time();
+        unsigned long long latency = now - ts;
 
         if (latency > max) max = latency;
         if (now > next_report) {
@@ -41,8 +43,8 @@ unsigned long capture_jitter(unsigned long duration, unsigned long granularity, 
 }
 
 int main(int argc, char* argv[]) {
-    unsigned long duration = 60000000000ul;
-    unsigned long granularity = 1000000000ul;
+    unsigned long long duration = 60 * NANOS_IN_SEC;
+    unsigned long long granularity = NANOS_IN_SEC;
     process_output out_function;
 
     int idx = 1;
@@ -57,11 +59,11 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    printf("duration: %lu\n", duration);
-    printf("report granularity: %lu\n", granularity);
+    printf("duration: %llus\n", duration/NANOS_IN_SEC);
+    printf("report granularity: %llums\n", granularity/1000000);
 
     struct jitter* jitter = calloc(duration/granularity, sizeof(struct jitter));
-    long data_points = capture_jitter(duration, granularity, jitter);
+    long long data_points = capture_jitter(duration, granularity, jitter);
     out_function(data_points, jitter);
 
     return 0;

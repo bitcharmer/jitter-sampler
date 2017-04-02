@@ -12,6 +12,20 @@
 struct timespec ts;
 long long cpu_mask = -1l;
 
+
+void print_usage() {
+    puts("Usage:\n");
+    puts("-h\tdisplay this usage message");
+    puts("-c\ttarget cpu to run on (default: any)");
+    puts("-d\tsampling duration in seconds (default: 60)");
+    puts("-r\tjitter reporting interval in milliseconds (default: 1000)");
+    puts("-o\toutput results using an output plugin. Supported plugins:");
+    puts("\tinflux://<host:port>\tstores results in influxDb with line protocol over UDP");
+    puts("\tcsv://<file>\tstores results in a csv file");
+
+    exit(0);
+}
+
 unsigned long long nano_time() {
     clock_gettime(CLOCK_REALTIME, &ts);
     return ts.tv_sec * NANOS_IN_SEC + ts.tv_nsec;
@@ -50,10 +64,11 @@ int main(int argc, char* argv[]) {
 
     int idx = 1;
     for (; idx < argc; idx++) {
-        if (strcmp("-c", argv[idx]) == 0) cpu_mask = 1 << strtol(argv[++idx], (char **)NULL, 10);
-        if (strcmp("-d", argv[idx]) == 0) duration = strtol(argv[++idx], (char **)NULL, 10) * NANOS_IN_SEC;
-        if (strcmp("-r", argv[idx]) == 0) granularity = strtol(argv[++idx], (char **)NULL, 10) * 1000000ul;
-        if (strcmp("-o", argv[idx]) == 0) {
+        if (strcmp("-h", argv[idx]) == 0) print_usage();
+        else if (strcmp("-c", argv[idx]) == 0) cpu_mask = 1 << strtol(argv[++idx], (char **)NULL, 10);
+        else if (strcmp("-d", argv[idx]) == 0) duration = strtol(argv[++idx], (char **)NULL, 10) * NANOS_IN_SEC;
+        else if (strcmp("-r", argv[idx]) == 0) granularity = strtol(argv[++idx], (char **)NULL, 10) * 1000000ul;
+        else if (strcmp("-o", argv[idx]) == 0) {
             char *output = argv[++idx];
             if (strstr(output, "influx://")) out_function = init_influx(output+9);
             else if (strstr(output, "csv://")) out_function = init_csv(output+6);
@@ -69,5 +84,4 @@ int main(int argc, char* argv[]) {
 
     return 0;
 }
-
 

@@ -5,6 +5,7 @@
 #include <sched.h>
 #include "jitter.h"
 #include "influx.h"
+#include "csv.h"
 
 #define NANOS_IN_SEC 1000000000ul
 
@@ -55,7 +56,7 @@ int main(int argc, char* argv[]) {
         if (strcmp("-o", argv[idx]) == 0) {
             char *output = argv[++idx];
             if (strstr(output, "influx://")) out_function = init_influx(output+9);
-            // add csv
+            else if (strstr(output, "csv://")) out_function = init_csv(output+6);
         }
     }
 

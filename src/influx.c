@@ -7,7 +7,7 @@
 #include <time.h>
 #include <stdio.h>
 #include <zconf.h>
-#include "jitter.h"
+#include "influx.h"
 
 #define BATCH_SIZE 10
 #define BUF_SIZE 2048

@@ -19,6 +19,7 @@ void print_usage() {
     puts("-c\ttarget cpu to run on (default: any)");
     puts("-d\tsampling duration in seconds (default: 60)");
     puts("-r\tjitter reporting interval in milliseconds (default: 1000)");
+    puts("-t\tjitter reporting threshold in nanoseconds; delays below this value will not be reported (default: 300)");
     puts("-o\toutput results using an output plugin. Supported plugins:");
     puts("\tinflux://<host:port>\tstores results in influxDb with line protocol over UDP");
     puts("\tcsv://<file>\tstores results in a csv file");
@@ -31,7 +32,8 @@ unsigned long long nano_time() {
     return ts.tv_sec * NANOS_IN_SEC + ts.tv_nsec;
 }
 
-unsigned long long capture_jitter(unsigned long long duration, unsigned long long granularity, struct jitter *jitter) {
+unsigned long long int capture_jitter(unsigned long long int duration, unsigned long long int granularity,
+                                      unsigned long long int threshold, struct jitter *jitter) {
     unsigned long long ts = nano_time();
     unsigned long long deadline = ts + duration;
     unsigned long long next_report = ts + granularity;
@@ -46,7 +48,7 @@ unsigned long long capture_jitter(unsigned long long duration, unsigned long lon
 
         if (latency > max) max = latency;
         if (now > next_report) {
-            jitter[idx++] = (struct jitter) {.timestamp = now, .delay = max};
+            if (max > threshold) jitter[idx++] = (struct jitter) {.timestamp = now, .delay = max};
             max = 0;
             next_report = now + granularity;
         }
@@ -54,12 +56,13 @@ unsigned long long capture_jitter(unsigned long long duration, unsigned long lon
         ts = now;
     }
 
-    return idx >> 1L;
+    return idx;
 }
 
 int main(int argc, char* argv[]) {
     unsigned long long duration = 60 * NANOS_IN_SEC;
     unsigned long long granularity = NANOS_IN_SEC;
+    unsigned long long threshold = 300;
     process_output out_function;
 
     int idx = 1;
@@ -68,6 +71,7 @@ int main(int argc, char* argv[]) {
         else if (strcmp("-c", argv[idx]) == 0) cpu_mask = 1 << strtol(argv[++idx], (char **)NULL, 10);
         else if (strcmp("-d", argv[idx]) == 0) duration = strtol(argv[++idx], (char **)NULL, 10) * NANOS_IN_SEC;
         else if (strcmp("-r", argv[idx]) == 0) granularity = strtol(argv[++idx], (char **)NULL, 10) * 1000000ul;
+        else if (strcmp("-t", argv[idx]) == 0) threshold = strtol(argv[++idx], (char **)NULL, 10);
         else if (strcmp("-o", argv[idx]) == 0) {
             char *output = argv[++idx];
             if (strstr(output, "influx://")) out_function = init_influx(output+9);
@@ -76,10 +80,11 @@ int main(int argc, char* argv[]) {
     }
 
     printf("duration: %llus\n", duration/NANOS_IN_SEC);
-    printf("report granularity: %llums\n", granularity/1000000);
+    printf("report interval: %llums\n", granularity/1000000);
+    printf("report threshold: %lluns\n", threshold);
 
     struct jitter* jitter = calloc(duration/granularity, sizeof(struct jitter));
-    long long data_points = capture_jitter(duration, granularity, jitter);
+    long long data_points = capture_jitter(duration, granularity, threshold, jitter);
     out_function(data_points, jitter);
 
     return 0;

@@ -1,5 +1,5 @@
 Compile with:
-gcc ./src/*.c ./src/*.h -o jitter
+gcc ./src/\*.c ./src/\*.h -o jitter
 
 Run with:
 jitter -c <target cpu> -d <duration seconds> -r <reporting interval> -o <output configuration>

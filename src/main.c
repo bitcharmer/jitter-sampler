@@ -3,6 +3,8 @@
 #include <string.h>
 #include <stdlib.h>
 #include <sched.h>
+#include <error.h>
+#include <numa.h>
 #include "jitter.h"
 #include "influx.h"
 #include "csv.h"
@@ -10,7 +12,10 @@
 #define NANOS_IN_SEC 1000000000ul
 
 struct timespec ts;
-long long cpu_mask = -1l;
+
+void print_args(int64_t duration, int64_t granularity, int64_t cpu);
+void affinitze_to_cpu(int64_t cpu) ;
+void parse_args(int argc, char *const *argv, int64_t *duration, int64_t *granularity, int64_t *cpu, process_output *process_output);
 
 
 void print_usage() {
@@ -19,7 +24,6 @@ void print_usage() {
     puts("-c\ttarget cpu to run on (default: any)");
     puts("-d\tsampling duration in seconds (default: 60)");
     puts("-r\tjitter reporting interval in milliseconds (default: 1000)");
-    puts("-t\tjitter reporting threshold in nanoseconds; delays below this value will not be reported (default: 300)");
     puts("-o\toutput results using an output plugin. Supported plugins:");
     puts("\tinflux://<host:port>\tstores results in influxDb with line protocol over UDP");
     puts("\tcsv://<file>\tstores results in a csv file");
@@ -27,28 +31,28 @@ void print_usage() {
     exit(0);
 }
 
-unsigned long long nano_time() {
+
+int64_t nano_time() {
     clock_gettime(CLOCK_REALTIME, &ts);
     return ts.tv_sec * NANOS_IN_SEC + ts.tv_nsec;
 }
 
-unsigned long long int capture_jitter(unsigned long long int duration, unsigned long long int granularity,
-                                      unsigned long long int threshold, struct jitter *jitter) {
-    unsigned long long ts = nano_time();
-    unsigned long long deadline = ts + duration;
-    unsigned long long next_report = ts + granularity;
-    unsigned long long max = 0;
-    unsigned long long idx = 0;
 
-    sched_setaffinity(0, sizeof(long long), (const cpu_set_t *) &cpu_mask);
+int64_t capture_jitter(int64_t duration, int64_t granularity, struct jitter *jitter) {
+    int64_t ts = nano_time();
+    int64_t deadline = ts + duration;
+    int64_t next_report = ts + granularity;
+    int64_t idx = 0, max = 0;
 
     while (ts < deadline) {
-        unsigned long long now = nano_time();
-        unsigned long long latency = now - ts;
+        int64_t now = nano_time();
+        int64_t latency = now - ts;
 
-        if (latency > max) max = latency;
+        int64_t diff = max - latency;
+        max -= diff & (diff >> 63);
+
         if (now > next_report) {
-            if (max > threshold) jitter[idx++] = (struct jitter) {.timestamp = now, .delay = max};
+            jitter[idx++] = (struct jitter) {.timestamp = now, .delay = max};
             max = 0;
             next_report = now + granularity;
         }
@@ -59,34 +63,55 @@ unsigned long long int capture_jitter(unsigned long long int duration, unsigned 
     return idx;
 }
 
+
 int main(int argc, char* argv[]) {
-    unsigned long long duration = 60 * NANOS_IN_SEC;
-    unsigned long long granularity = NANOS_IN_SEC;
-    unsigned long long threshold = 300;
-    process_output out_function;
+    int64_t duration = 60 * NANOS_IN_SEC;
+    int64_t granularity = NANOS_IN_SEC;
+    int64_t cpu = 0;
+    process_output process_output;
 
-    int idx = 1;
-    for (; idx < argc; idx++) {
-        if (strcmp("-h", argv[idx]) == 0) print_usage();
-        else if (strcmp("-c", argv[idx]) == 0) cpu_mask = 1 << strtol(argv[++idx], (char **)NULL, 10);
-        else if (strcmp("-d", argv[idx]) == 0) duration = strtol(argv[++idx], (char **)NULL, 10) * NANOS_IN_SEC;
-        else if (strcmp("-r", argv[idx]) == 0) granularity = strtol(argv[++idx], (char **)NULL, 10) * 1000000ul;
-        else if (strcmp("-t", argv[idx]) == 0) threshold = strtol(argv[++idx], (char **)NULL, 10);
-        else if (strcmp("-o", argv[idx]) == 0) {
-            char *output = argv[++idx];
-            if (strstr(output, "influx://")) out_function = init_influx(output+9);
-            else if (strstr(output, "csv://")) out_function = init_csv(output+6);
-        }
-    }
+    parse_args(argc, argv, &duration, &granularity, &cpu, &process_output);
+    print_args(duration, granularity, cpu);
+    affinitze_to_cpu(cpu);
 
-    printf("duration: %llus\n", duration/NANOS_IN_SEC);
-    printf("report interval: %llums\n", granularity/1000000);
-    printf("report threshold: %lluns\n", threshold);
+    struct jitter* jitter = numa_alloc_local(duration/granularity * sizeof(struct jitter));
+    int64_t data_len = capture_jitter(duration, granularity, jitter);
 
-    struct jitter* jitter = calloc(duration/granularity, sizeof(struct jitter));
-    long long data_points = capture_jitter(duration, granularity, threshold, jitter);
-    out_function(data_points, jitter);
+    printf("Finished with %li results\n", data_len);
+    process_output(data_len, jitter, cpu);
 
     return 0;
+}
+
+
+void parse_args(int argc, char *const *argv, int64_t *duration, int64_t *granularity, int64_t *cpu, process_output *process_output) {
+    for (int idx = 1; idx < argc; idx++) {
+        if (strcmp("-h", argv[idx]) == 0) print_usage();
+        else if (strcmp("-c", argv[idx]) == 0) (*cpu) = strtol(argv[++idx], (char **)NULL, 10);
+        else if (strcmp("-d", argv[idx]) == 0) (*duration) = strtol(argv[++idx], (char **)NULL, 10) * NANOS_IN_SEC;
+        else if (strcmp("-r", argv[idx]) == 0) (*granularity) = strtol(argv[++idx], (char **)NULL, 10) * 1000000ul;
+        else if (strcmp("-o", argv[idx]) == 0) {
+            char *output = argv[++idx];
+            if (strstr(output, "influx://")) (*process_output) = init_influx(output + 9);
+            else if (strstr(output, "csv://")) (*process_output) = init_csv(output + 6);
+        }
+    }
+}
+
+
+void affinitze_to_cpu(int64_t cpu) {
+    int64_t cpu_mask = 1 << cpu;
+    int result = sched_setaffinity(0, sizeof(long long), (const cpu_set_t *) &cpu_mask);
+    if (result != 0) {
+        error(1, result, "Could not set affinity. Exiting...");
+        exit(1);
+    }
+}
+
+
+void print_args(int64_t duration, int64_t granularity, int64_t cpu) {
+    printf("cpu: %li\n", cpu);
+    printf("duration: %lus\n", duration/NANOS_IN_SEC);
+    printf("report interval: %lims\n", granularity/1000000);
 }
 

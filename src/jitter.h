@@ -1,6 +1,7 @@
 #ifndef JITTER_H
 #define JITTER_H
 
+#include <stdint.h>
 
 struct jitter {
     int64_t timestamp;

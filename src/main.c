@@ -1,13 +1,16 @@
 #include <stdio.h>
+#include "jitter.h"
+#include "influx.h"
+#include "csv.h"
 #include <time.h>
 #include <string.h>
 #include <stdlib.h>
 #include <sched.h>
 #include <error.h>
 #include <numa.h>
-#include "jitter.h"
-#include "influx.h"
-#include "csv.h"
+#include <sys/mman.h>
+#include <sys/io.h>
+
 
 #define NANOS_IN_SEC 1000000000ul
 
@@ -32,11 +35,16 @@ void print_usage() {
 }
 
 
-int64_t nano_time() {
+static inline int64_t nano_time() {
     clock_gettime(CLOCK_REALTIME, &ts);
     return ts.tv_sec * NANOS_IN_SEC + ts.tv_nsec;
 }
 
+static __inline__ unsigned long long rdtsc_time(void) {
+    unsigned hi, lo;
+    __asm__ __volatile__ ("rdtsc" : "=a"(lo), "=d"(hi));
+    return (( (unsigned long long)lo)|( ((unsigned long long)hi)<<32 )) / 2.5;
+}
 
 int64_t capture_jitter(int64_t duration, int64_t granularity, struct jitter *jitter) {
     int64_t ts = nano_time();
@@ -45,16 +53,16 @@ int64_t capture_jitter(int64_t duration, int64_t granularity, struct jitter *jit
     int64_t idx = 0, max = 0;
 
     while (ts < deadline) {
-        int64_t now = nano_time();
+        int64_t now = rdtsc();
         int64_t latency = now - ts;
 
-        int64_t diff = max - latency;
-        max -= diff & (diff >> 63);
+        if (latency > max) max = latency;
 
         if (now > next_report) {
             jitter[idx++] = (struct jitter) {.timestamp = now, .delay = max};
             max = 0;
             next_report = now + granularity;
+            now = nano_time();
         }
 
         ts = now;
@@ -74,11 +82,40 @@ int main(int argc, char* argv[]) {
     print_args(duration, granularity, cpu);
     affinitze_to_cpu(cpu);
 
-    struct jitter* jitter = numa_alloc_local(duration/granularity * sizeof(struct jitter));
+    puts("MLOCKING AAARRR everything");
+    int ret = mlockall(MCL_CURRENT | MCL_FUTURE);
+    if (ret) {
+        puts("OMG, MLOCK didn't work!");
+    }
+
+    int64_t items = duration / granularity;
+    size_t sz = items * sizeof(struct jitter);
+    printf("mmapping %lu KB\n", sz / 1024);
+    struct jitter* jitter = mmap(NULL, sz, PROT_WRITE | PROT_READ, MAP_HUGETLB | MAP_ANONYMOUS | MAP_PRIVATE | MAP_POPULATE | MAP_LOCKED, 0, 0);
+
+    if (jitter == NULL) {
+        puts("Ooops");
+        exit(1);
+    }
+
+    puts("MADVISE");
+    madvise(jitter, sz, MADV_SEQUENTIAL);
+
+    puts("Prefaulting");
+    for (int i = 0; i < items; i++)
+        jitter[i].timestamp = 0;
+
+    puts("Disabling irqs and running shit");
+    iopl(3);
+    asm("cli");
+    capture_jitter(1000000000L, 1000000L, jitter);
     int64_t data_len = capture_jitter(duration, granularity, jitter);
+
+    asm("sti");
 
     printf("Finished with %li results\n", data_len);
     process_output(data_len, jitter, cpu);
+    munmap(jitter, sz);
 
     return 0;
 }

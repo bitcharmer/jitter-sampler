@@ -4,9 +4,9 @@
 
 FILE *f;
 
-void write_to_file(int64_t size, struct jitter *results, int64_t cpu) {
-    for (int64_t i = 0; i < size; i++)
-        fprintf(f, "%li,%li\n", results[i].timestamp, results[i].delay);
+void write_to_file(long long size, struct jitter *results, int cpu) {
+    for (long long i = 0; i < size; i++)
+        fprintf(f, "%lli,%lli\n", results[i].timestamp, results[i].delay);
 
     fclose(f);
 }

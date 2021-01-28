@@ -3,19 +3,22 @@
 
 #include <stdint.h>
 
-typedef void (*process_output) (int64_t, struct jitter*, int64_t);
-typedef int64_t (*time_func) (void);
+#define likely(x)       __builtin_expect((x),1)
+#define unlikely(x)     __builtin_expect((x),0)
 
 struct jitter {
-    int64_t timestamp;
-    int64_t delay;
+    long long timestamp;
+    long long delay;
 };
 
+typedef void (*process_output) (long long, struct jitter*, int);
+
+typedef long long (*time_func) (void);
+
 struct program_args {
-    _Bool hist_mode;
     _Bool disable_irqs;
-    int64_t duration;
-    int64_t granularity;
+    long long duration;
+    long long granularity;
     int cpu;
     process_output process_output;
     time_func time_func;

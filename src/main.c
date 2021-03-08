@@ -51,10 +51,16 @@ static __inline__ long long rdtsc_time(void) {
 }
 
 
-static inline long long nano_time() {
+static inline long long clock_realtime() {
     static struct timespec ts;
     clock_gettime(CLOCK_REALTIME, &ts);
     return ts.tv_sec * NANOS_IN_SEC + ts.tv_nsec;
+}
+
+static inline long long clock_monotonic() {
+    static struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return ts.tv_sec * NANOS_IN_SEC + ts.tv_nsec + time_offset;
 }
 
 
@@ -99,7 +105,7 @@ int main(int argc, char* argv[]) {
             .granularity = NANOS_IN_SEC,
             .cpu = -1,
             .process_output = NULL,
-            .time_func = nano_time
+            .time_func = clock_realtime
     };
 
     if (argc == 1) {
@@ -137,12 +143,12 @@ int main(int argc, char* argv[]) {
         asm volatile("cli": : :"memory");
     }
 
-    if (args.time_func == rdtsc_time) {
-        if (cpu_freq == 0)
+    if (args.time_func == rdtsc_time || args.time_func == clock_monotonic) {
+        if (args.time_func == rdtsc_time && cpu_freq == 0)
             error(1, 0, "Using RDTSC-based time requires passing cpu frequency with -f argument");
 
-        long long now = nano_time();
-        time_offset = now - rdtscp_time();
+        long long now = clock_realtime();
+        time_offset = now - args.time_func();
     }
 
     // code/data warm-up
@@ -168,8 +174,9 @@ void print_usage() {
     puts(" -n             disable local interrupts on the target cpu for the duration of the program run (may require sudo)");
     puts(" -c cpu         target cpu to run on (default: any)");
     puts(" -t method      timestamp capturing method (default: realtime). Allowed values:\n"
-         "                - realtime  (uses clock_gettime(CLOCK_REALTIME),\n"
-         "                - rdtsc     (uses RDTSC instruction, requires passing target CPU frequency with -f argument\n");
+         "                - realtime        uses clock_gettime(CLOCK_REALTIME),\n"
+         "                - monotonic       uses clock_gettime(CLOCK_MONOTONIC),\n"
+         "                - rdtsc           uses RDTSC instruction, requires passing target CPU frequency with -f argument\n");
     puts(" -f frequency   target cpu frequency in GHz as decimal number");
     puts(" -d duration    sampling duration in seconds (default: 60)");
     puts(" -r interval    jitter reporting interval in milliseconds (default: 1000)");
@@ -204,6 +211,7 @@ void parse_args(int argc, char *const *argv, struct program_args *args) {
                 break;
             case 't':
                 if (strstr(optarg, "rdtsc")) args->time_func = rdtsc_time;
+                else if (strstr(optarg, "monotonic")) args->time_func = clock_monotonic;
                 break;
             case 'f':
                 cpu_freq = strtold(optarg, NULL);
